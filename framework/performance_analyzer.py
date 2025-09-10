@@ -286,11 +286,16 @@ class PerformanceAnalyzer:
         # 4. Performance Metrics Comparison Table
         ax4.axis('off')
         
-        # Create comparison table data
+        # Create comparison table data sorted by annualized return
         table_data = []
         headers = ['Strategy', 'Return', 'Volatility', 'Sharpe', 'Max DD', 'Alpha', 'Trades']
         
-        for strategy_name, result in results.items():
+        # Sort strategies by annualized return (descending)
+        sorted_results = sorted(results.items(), 
+                               key=lambda x: x[1]['annualized_return_strategy'], 
+                               reverse=True)
+        
+        for strategy_name, result in sorted_results:
             table_data.append([
                 strategy_name,  # Show full strategy name
                 f"{result['annualized_return_strategy']:.1%}",
