@@ -5,10 +5,24 @@ S&P 500 Machine Learning Trading Strategy
 This script implements a complete machine learning trading strategy for the S&P 500 index,
 incorporating both technical indicators and macroeconomic data for signal generation.
 
+Features:
+- 62+ years of historical data (1962-2024)
+- Real macroeconomic data from FRED API
+- Technical indicators (SMA, RSI, Bollinger Bands, etc.)
+- Machine learning with Random Forest Classifier
+- Realistic trading costs (default: 0.1% per trade)
+- Comprehensive backtesting with performance metrics
+
 Required FRED API Key:
 - Visit https://fred.stlouisfed.org/docs/api/api_key.html
 - Create a free account and request an API key
 - Add your API key to the .env file: FRED_API_KEY=your_actual_key_here
+
+Trading Costs:
+- Default: 0.1% (10 basis points) per trade
+- Includes both buying and selling costs
+- Typical range: 0.05% (discount broker) to 0.25% (full-service broker)
+- ETF costs typically lower: ~0.01-0.05%
 
 Author: Auto-generated trading strategy
 """
@@ -23,6 +37,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import os
 from dotenv import load_dotenv
+import matplotlib
+# Try different backends in order of preference
+try:
+    matplotlib.use('TkAgg')  # Most common GUI backend
+except ImportError:
+    try:
+        matplotlib.use('Qt5Agg')  # Qt backend
+    except ImportError:
+        try:
+            matplotlib.use('GTK3Agg')  # GTK backend
+        except ImportError:
+            matplotlib.use('Agg')  # Fallback - saves to file instead
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -31,10 +61,11 @@ load_dotenv()
 
 # Configuration
 FRED_API_KEY = os.getenv('FRED_API_KEY')
-START_DATE = "2010-01-01"
+START_DATE = "1962-01-02"  # Maximum historical data available (limited by DGS10)
 END_DATE = "2024-01-01"
 LOOKBACK_DAYS = 5  # Days to look ahead for target variable
-PROBABILITY_THRESHOLD = 0.6  # Threshold for buy signal generation
+PROBABILITY_THRESHOLD = 0.4  # Threshold for buy signal generation
+TRADING_COST_PCT = 0.001  # Trading cost as percentage (0.1% = 10 basis points per trade)
 
 def fetch_sp500_data(start_date, end_date):
     """
@@ -363,14 +394,15 @@ def generate_signals(model, X, threshold=0.6):
     
     return results
 
-def backtest_strategy(price_data, signals, initial_capital=10000):
+def backtest_strategy(price_data, signals, initial_capital=10000, trading_cost_pct=0.001):
     """
-    Perform basic backtesting of the trading strategy.
+    Perform basic backtesting of the trading strategy with trading costs.
     
     Args:
         price_data (pd.DataFrame): Price data with Close column
         signals (pd.DataFrame): Trading signals
         initial_capital (float): Starting capital amount
+        trading_cost_pct (float): Trading cost as percentage of trade value (e.g., 0.001 = 0.1%)
     
     Returns:
         dict: Backtesting results and metrics
@@ -385,13 +417,23 @@ def backtest_strategy(price_data, signals, initial_capital=10000):
     # Calculate returns
     returns = prices.pct_change().dropna()
     
+    # Identify trading events (signal changes)
+    sigs_aligned = sigs.shift(1)  # Shift signals to avoid look-ahead bias
+    sigs_aligned = sigs_aligned.dropna()
+    
+    # Find trading events (when signal changes from 0 to 1 or 1 to 0)
+    signal_changes = sigs_aligned.diff() != 0
+    
     # Strategy returns: only take returns when signal is 1 (buy), otherwise 0
-    strategy_returns = returns * sigs.shift(1)  # Shift signals to avoid look-ahead bias
-    strategy_returns = strategy_returns.dropna()
+    strategy_returns = returns * sigs_aligned
+    
+    # Apply trading costs when signals change (both buying and selling)
+    trading_costs = signal_changes * trading_cost_pct
+    strategy_returns_with_costs = strategy_returns - trading_costs
     
     # Calculate cumulative returns
     buy_and_hold_cumulative = (1 + returns).cumprod()
-    strategy_cumulative = (1 + strategy_returns).cumprod()
+    strategy_cumulative = (1 + strategy_returns_with_costs).cumprod()
     
     # Calculate final values
     final_buy_and_hold = initial_capital * buy_and_hold_cumulative.iloc[-1]
@@ -403,7 +445,11 @@ def backtest_strategy(price_data, signals, initial_capital=10000):
     
     # Calculate Sharpe ratios (assuming 252 trading days per year)
     sharpe_bh = np.sqrt(252) * returns.mean() / returns.std()
-    sharpe_strategy = np.sqrt(252) * strategy_returns.mean() / strategy_returns.std() if strategy_returns.std() > 0 else 0
+    sharpe_strategy = np.sqrt(252) * strategy_returns_with_costs.mean() / strategy_returns_with_costs.std() if strategy_returns_with_costs.std() > 0 else 0
+    
+    # Calculate total trading costs
+    total_trading_events = signal_changes.sum()
+    total_trading_costs_pct = total_trading_events * trading_cost_pct
     
     # Calculate maximum drawdown for strategy
     cumulative_max = strategy_cumulative.expanding().max()
@@ -420,6 +466,9 @@ def backtest_strategy(price_data, signals, initial_capital=10000):
         'sharpe_ratio_strategy': sharpe_strategy,
         'max_drawdown': max_drawdown,
         'number_of_trades': sigs.sum(),
+        'trading_events': total_trading_events,
+        'total_trading_costs_pct': total_trading_costs_pct,
+        'trading_cost_pct': trading_cost_pct,
         'strategy_cumulative_returns': strategy_cumulative,
         'buy_and_hold_cumulative_returns': buy_and_hold_cumulative
     }
@@ -432,9 +481,165 @@ def backtest_strategy(price_data, signals, initial_capital=10000):
     print(f"Strategy Sharpe Ratio: {sharpe_strategy:.3f}")
     print(f"Buy & Hold Sharpe Ratio: {sharpe_bh:.3f}")
     print(f"Maximum Drawdown: {max_drawdown:.1%}")
-    print(f"Number of Trades: {sigs.sum()}")
+    print(f"Number of Trading Events: {total_trading_events}")
+    print(f"Total Trading Costs: {total_trading_costs_pct:.2%} of capital")
+    print(f"Trading Cost per Trade: {trading_cost_pct:.3%}")
     
     return results
+
+def plot_performance_analysis(backtest_results, test_price_data):
+    """
+    Create comprehensive performance visualization plots.
+    
+    Args:
+        backtest_results (dict): Results from backtest_strategy function
+        test_price_data (pd.DataFrame): Price data for the test period
+    """
+    print("Creating performance visualization plots...")
+    
+    # Set up matplotlib style
+    plt.style.use('default')
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle('S&P 500 ML Trading Strategy Performance Analysis', fontsize=16, fontweight='bold')
+    
+    # Get the cumulative returns data
+    strategy_cum = backtest_results['strategy_cumulative_returns']
+    benchmark_cum = backtest_results['buy_and_hold_cumulative_returns']
+    
+    # Align data with dates
+    dates = strategy_cum.index
+    
+    # 1. Cumulative Returns (Log2 Scale)
+    ax1.plot(dates, strategy_cum, label='ML Strategy', color='blue', linewidth=2)
+    ax1.plot(dates, benchmark_cum, label='Buy & Hold (S&P 500)', color='red', linewidth=2)
+    ax1.set_yscale('log', base=2)
+    ax1.set_ylabel('Cumulative Return (Log₂ Scale)', fontweight='bold')
+    ax1.set_title('Cumulative Returns Comparison', fontweight='bold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Format y-axis to show readable values
+    def log2_formatter(x, pos):
+        return f'{x:.1f}x'
+    ax1.yaxis.set_major_formatter(FuncFormatter(log2_formatter))
+    
+    # Format x-axis dates
+    ax1.xaxis.set_major_locator(mdates.YearLocator(5))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
+    
+    # 2. Drawdown Comparison
+    strategy_max = strategy_cum.expanding().max()
+    benchmark_max = benchmark_cum.expanding().max()
+    
+    strategy_drawdown = (strategy_cum - strategy_max) / strategy_max * 100
+    benchmark_drawdown = (benchmark_cum - benchmark_max) / benchmark_max * 100
+    
+    ax2.fill_between(dates, strategy_drawdown, 0, label='ML Strategy', color='blue', alpha=0.7)
+    ax2.fill_between(dates, benchmark_drawdown, 0, label='Buy & Hold', color='red', alpha=0.7)
+    ax2.set_ylabel('Drawdown (%)', fontweight='bold')
+    ax2.set_title('Drawdown Comparison', fontweight='bold')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # Format x-axis dates
+    ax2.xaxis.set_major_locator(mdates.YearLocator(5))
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
+    
+    # 3. Monthly Returns Scatter Plot
+    # Calculate monthly returns
+    monthly_prices = test_price_data['Close'].resample('M').last()
+    monthly_returns_benchmark = monthly_prices.pct_change().dropna() * 100
+    
+    # For strategy, we need to calculate monthly returns from daily data
+    strategy_daily_returns = strategy_cum.pct_change().fillna(0)
+    strategy_monthly_returns = (1 + strategy_daily_returns).resample('M').prod() - 1
+    strategy_monthly_returns = strategy_monthly_returns.dropna() * 100
+    
+    # Align the monthly returns
+    common_months = strategy_monthly_returns.index.intersection(monthly_returns_benchmark.index)
+    strategy_monthly_aligned = strategy_monthly_returns.loc[common_months]
+    benchmark_monthly_aligned = monthly_returns_benchmark.loc[common_months]
+    
+    ax3.scatter(benchmark_monthly_aligned, strategy_monthly_aligned, alpha=0.6, color='green', s=20)
+    
+    # Add diagonal line (perfect correlation)
+    min_val = min(benchmark_monthly_aligned.min(), strategy_monthly_aligned.min())
+    max_val = max(benchmark_monthly_aligned.max(), strategy_monthly_aligned.max())
+    ax3.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, label='Perfect Correlation')
+    
+    ax3.set_xlabel('S&P 500 Monthly Return (%)', fontweight='bold')
+    ax3.set_ylabel('Strategy Monthly Return (%)', fontweight='bold')
+    ax3.set_title('Monthly Returns Correlation', fontweight='bold')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # Calculate and display correlation
+    correlation = np.corrcoef(benchmark_monthly_aligned, strategy_monthly_aligned)[0, 1]
+    ax3.text(0.05, 0.95, f'Correlation: {correlation:.3f}', transform=ax3.transAxes, 
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # 4. Performance Summary Statistics
+    ax4.axis('off')  # Turn off axis for text display
+    
+    # Calculate additional metrics
+    final_strategy = backtest_results['final_value_strategy']
+    final_benchmark = backtest_results['final_value_buy_and_hold']
+    initial_capital = backtest_results['initial_capital']
+    
+    strategy_return = (final_strategy / initial_capital - 1) * 100
+    benchmark_return = (final_benchmark / initial_capital - 1) * 100
+    
+    # Calculate annualized returns
+    years = len(strategy_cum) / 252  # Approximate trading days per year
+    strategy_annual = ((final_strategy / initial_capital) ** (1/years) - 1) * 100
+    benchmark_annual = ((final_benchmark / initial_capital) ** (1/years) - 1) * 100
+    
+    # Performance summary text
+    summary_text = f"""
+    PERFORMANCE SUMMARY
+    ════════════════════════════════
+    
+    Total Period: {years:.1f} years
+    
+    RETURNS:
+    • Strategy Total Return: {strategy_return:.1f}%
+    • S&P 500 Total Return: {benchmark_return:.1f}%
+    • Strategy Annualized: {strategy_annual:.1f}%
+    • S&P 500 Annualized: {benchmark_annual:.1f}%
+    
+    RISK METRICS:
+    • Strategy Sharpe Ratio: {backtest_results['sharpe_ratio_strategy']:.3f}
+    • S&P 500 Sharpe Ratio: {backtest_results['sharpe_ratio_buy_and_hold']:.3f}
+    • Max Drawdown: {backtest_results['max_drawdown']:.1f}%
+    
+    TRADING:
+    • Number of Trades: {backtest_results['trading_events']}
+    • Total Trading Costs: {backtest_results['total_trading_costs_pct']:.2f}%
+    • Monthly Correlation: {correlation:.3f}
+    """
+    
+    ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes, fontsize=10, 
+             verticalalignment='top', fontfamily='monospace',
+             bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Check which backend is being used and handle accordingly
+    current_backend = matplotlib.get_backend()
+    print(f"Using matplotlib backend: {current_backend}")
+    
+    if current_backend == 'Agg':
+        # Save plot to file if using non-interactive backend
+        filename = 'sp500_strategy_performance.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Plot saved as '{filename}' (backend doesn't support display)")
+        plt.close()
+    else:
+        # Show interactive plot
+        plt.show(block=True)  # block=True ensures plot stays open
+        print("Performance analysis plots displayed!")
 
 def main():
     """
@@ -469,7 +674,10 @@ def main():
         
         # Step 9: Backtest strategy
         test_price_data = combined_data.loc[X_test.index]
-        backtest_results = backtest_strategy(test_price_data, signals)
+        backtest_results = backtest_strategy(test_price_data, signals, trading_cost_pct=TRADING_COST_PCT)
+        
+        # Step 10: Create performance visualization plots
+        plot_performance_analysis(backtest_results, test_price_data)
         
         print("\n=== Strategy Complete ===")
         
@@ -477,7 +685,8 @@ def main():
             'model': model,
             'signals': signals,
             'backtest_results': backtest_results,
-            'combined_data': combined_data
+            'combined_data': combined_data,
+            'test_price_data': test_price_data
         }
         
     except Exception as e:

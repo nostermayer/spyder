@@ -55,6 +55,18 @@ venv.bak/
 # Logs
 *.log
 
+# Generated analysis files (from trading strategy framework)
+*_analysis.png
+*_comparison*.png
+*_framework.png
+*_metrics*.png
+top_strategy_*.png
+strategy_comparison.png
+rolling_metrics.png
+model_probability_analysis.png
+performance_report*.txt
+sp500_strategy_performance.png
+
 # OS
 .DS_Store
 Thumbs.db
