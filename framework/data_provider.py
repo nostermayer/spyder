@@ -102,7 +102,7 @@ class DataProvider:
                 macro_data[indicator] = data
             
             # Forward fill missing values
-            macro_data = macro_data.fillna(method='ffill')
+            macro_data = macro_data.ffill()
             
             print(f"Successfully fetched macroeconomic data with {len(macro_data)} observations")
             return macro_data
@@ -194,7 +194,7 @@ class DataProvider:
         combined_data = pd.concat([price_data, macro_data_daily], axis=1)
         
         # Forward fill any remaining missing values
-        combined_data = combined_data.fillna(method='ffill')
+        combined_data = combined_data.ffill()
         
         print(f"Combined dataset created with {len(combined_data)} observations")
         return combined_data

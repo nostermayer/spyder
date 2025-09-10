@@ -55,9 +55,21 @@ class BacktestEngine:
         if len(common_dates) == 0:
             raise ValueError("No common dates between price data and signals")
         
+        if len(common_dates) < 30:
+            raise ValueError(f"Insufficient data for backtesting: {len(common_dates)} observations (minimum 30 required)")
+        
         prices = price_data.loc[common_dates, 'Close'].copy()
         sigs = signals.loc[common_dates, 'Signal'].copy()
         probs = signals.loc[common_dates, 'Probability'].copy()
+        
+        # Validate data integrity
+        if prices.isnull().any():
+            print(f"Warning: {prices.isnull().sum()} missing price values detected, forward-filling")
+            prices = prices.ffill()
+        
+        if sigs.isnull().any():
+            print(f"Warning: {sigs.isnull().sum()} missing signal values detected, filling with 0")
+            sigs = sigs.fillna(0)
         
         # Calculate returns
         returns = prices.pct_change().dropna()
@@ -142,20 +154,44 @@ class BacktestEngine:
         monthly_returns_strategy = self._calculate_monthly_returns(strategy_returns_net)
         monthly_returns_benchmark = self._calculate_monthly_returns(returns)
         
-        # Calculate correlation
-        correlation = np.corrcoef(monthly_returns_strategy, monthly_returns_benchmark)[0, 1]
-        if np.isnan(correlation):
+        # Calculate correlation with error handling
+        try:
+            if len(monthly_returns_strategy) >= 12 and len(monthly_returns_benchmark) >= 12:
+                correlation = np.corrcoef(monthly_returns_strategy, monthly_returns_benchmark)[0, 1]
+                if np.isnan(correlation) or np.isinf(correlation):
+                    correlation = 0.0
+            else:
+                print("Warning: Insufficient monthly data for correlation calculation")
+                correlation = 0.0
+        except Exception as e:
+            print(f"Warning: Correlation calculation failed: {e}")
             correlation = 0.0
         
-        # Beta calculation (strategy vs benchmark)
-        covariance = np.cov(strategy_returns_net, returns)[0, 1]
-        benchmark_variance = np.var(returns)
-        beta = covariance / benchmark_variance if benchmark_variance > 0 else 1.0
+        # Beta calculation (strategy vs benchmark) with error handling
+        try:
+            if len(strategy_returns_net) >= 30 and len(returns) >= 30:
+                covariance = np.cov(strategy_returns_net, returns)[0, 1]
+                benchmark_variance = np.var(returns)
+                if benchmark_variance > 1e-10:  # Avoid division by very small numbers
+                    beta = covariance / benchmark_variance
+                    # Clip extreme beta values
+                    beta = np.clip(beta, -5.0, 5.0)
+                else:
+                    print("Warning: Near-zero benchmark variance, setting beta to 1.0")
+                    beta = 1.0
+            else:
+                print("Warning: Insufficient data for beta calculation")
+                beta = 1.0
+        except Exception as e:
+            print(f"Warning: Beta calculation failed: {e}")
+            beta = 1.0
         
         # Alpha calculation (annualized)
         risk_free_rate = risk_free_daily * 252  # Use actual Treasury rate
-        strategy_annual_return = (1 + total_return_strategy) ** (252 / len(returns)) - 1
-        benchmark_annual_return = (1 + total_return_bh) ** (252 / len(returns)) - 1
+        # Calculate actual time period in years for proper annualization
+        years = len(returns) / 252.0
+        strategy_annual_return = (1 + total_return_strategy) ** (1/years) - 1 if years > 0 else 0
+        benchmark_annual_return = (1 + total_return_bh) ** (1/years) - 1 if years > 0 else 0
         alpha = strategy_annual_return - (risk_free_rate + beta * (benchmark_annual_return - risk_free_rate))
         
         # Compile results
@@ -220,12 +256,27 @@ class BacktestEngine:
         return results
     
     def _calculate_sharpe_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
-        """Calculate annualized Sharpe ratio."""
-        if len(returns) == 0 or returns.std() == 0:
+        """Calculate annualized Sharpe ratio with robust error handling."""
+        if len(returns) < 30:  # Minimum 30 observations
+            print(f"Warning: Insufficient data for Sharpe ratio ({len(returns)} observations)")
             return 0.0
         
-        excess_returns = returns.mean() - risk_free_rate / 252  # Daily risk-free rate
-        return np.sqrt(252) * excess_returns / returns.std()
+        if returns.std() == 0 or np.isnan(returns.std()):
+            print("Warning: Zero or NaN volatility detected, returning 0 Sharpe ratio")
+            return 0.0
+        
+        # Remove outliers (clip extreme returns)
+        returns_clean = returns.clip(lower=returns.quantile(0.01), 
+                                   upper=returns.quantile(0.99))
+        
+        if returns_clean.std() == 0:
+            return 0.0
+        
+        excess_returns = returns_clean.mean() - risk_free_rate / 252  # Daily risk-free rate
+        sharpe = np.sqrt(252) * excess_returns / returns_clean.std()
+        
+        # Handle extreme values
+        return np.clip(sharpe, -10.0, 10.0) if not np.isnan(sharpe) else 0.0
     
     def _calculate_drawdown(self, cumulative_returns: pd.Series) -> float:
         """Calculate maximum drawdown."""
@@ -251,13 +302,22 @@ class BacktestEngine:
         # Check if TB3MS column exists in price_data
         if 'TB3MS' in price_data.columns:
             # Get Treasury bill rates aligned with our index
-            tb3ms_data = price_data.loc[common_index, 'TB3MS']
-            # Convert annual percentage rate to daily returns
-            daily_cash_returns = (tb3ms_data / 100) / 252  # 252 trading days per year
+            tb3ms_data = price_data.loc[common_index, 'TB3MS'].copy()
+            
+            # Handle missing values with forward fill, then backward fill
+            tb3ms_data = tb3ms_data.ffill().bfill()
+            
+            # Validate Treasury rate values (should be between -5% and 20%)
+            tb3ms_data = tb3ms_data.clip(lower=-5.0, upper=20.0)
+            
+            # Convert annual percentage to daily returns using calendar days
+            # Treasury bills are quoted on an annualized basis using 365 days
+            daily_cash_returns = (tb3ms_data / 100) / 365
+            
         else:
             # Fallback to constant 2% annual rate if TB3MS not available
             print("Warning: TB3MS data not available, using 2% constant cash rate")
-            daily_cash_returns = pd.Series(0.02 / 252, index=common_index)
+            daily_cash_returns = pd.Series(0.02 / 365, index=common_index)
         
         return daily_cash_returns
 
