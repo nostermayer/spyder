@@ -9,10 +9,14 @@ Each signal generator takes features as input and outputs buy/sell signals.
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import TimeSeriesSplit
+import xgboost as xgb
+import lightgbm as lgb
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -386,6 +390,443 @@ class RSISignalGenerator(SignalGenerator):
         return results
 
 
+class KNeighborsSignalGenerator(SignalGenerator):
+    """
+    K-Nearest Neighbors based signal generator.
+    """
+    
+    def __init__(self, name="K-Neighbors", probability_threshold=0.5, **knn_params):
+        """
+        Initialize K-Neighbors signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **knn_params: Additional parameters for KNeighborsClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default KNN parameters
+        default_params = {
+            'n_neighbors': 5,
+            'weights': 'distance',  # Weight neighbors by distance
+            'algorithm': 'auto',
+            'metric': 'euclidean'
+        }
+        default_params.update(knn_params)
+        
+        self.model = KNeighborsClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the K-Neighbors model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using K-Neighbors predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+
+
+class XGBoostSignalGenerator(SignalGenerator):
+    """
+    XGBoost based signal generator.
+    """
+    
+    def __init__(self, name="XGBoost", probability_threshold=0.5, **xgb_params):
+        """
+        Initialize XGBoost signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **xgb_params: Additional parameters for XGBClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default XGBoost parameters
+        default_params = {
+            'n_estimators': 100,
+            'max_depth': 6,
+            'learning_rate': 0.1,
+            'random_state': 42,
+            'eval_metric': 'logloss',
+            'verbosity': 0  # Suppress XGBoost output
+        }
+        default_params.update(xgb_params)
+        
+        self.model = xgb.XGBClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the XGBoost model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using XGBoost predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+    
+    def get_feature_importance(self):
+        """Get feature importance from XGBoost."""
+        if not self.is_trained:
+            return None
+            
+        importance_df = pd.DataFrame({
+            'feature': self.feature_names,
+            'importance': self.model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        return importance_df
+
+
+class LightGBMSignalGenerator(SignalGenerator):
+    """
+    LightGBM based signal generator.
+    """
+    
+    def __init__(self, name="LightGBM", probability_threshold=0.5, **lgb_params):
+        """
+        Initialize LightGBM signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **lgb_params: Additional parameters for LGBMClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default LightGBM parameters
+        default_params = {
+            'n_estimators': 100,
+            'max_depth': 6,
+            'learning_rate': 0.1,
+            'random_state': 42,
+            'verbosity': -1  # Suppress LightGBM output
+        }
+        default_params.update(lgb_params)
+        
+        self.model = lgb.LGBMClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the LightGBM model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using LightGBM predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+    
+    def get_feature_importance(self):
+        """Get feature importance from LightGBM."""
+        if not self.is_trained:
+            return None
+            
+        importance_df = pd.DataFrame({
+            'feature': self.feature_names,
+            'importance': self.model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        return importance_df
+
+
+class ExtraTreesSignalGenerator(SignalGenerator):
+    """
+    Extra Trees (Extremely Randomized Trees) based signal generator.
+    """
+    
+    def __init__(self, name="Extra Trees", probability_threshold=0.5, **et_params):
+        """
+        Initialize Extra Trees signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **et_params: Additional parameters for ExtraTreesClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default Extra Trees parameters
+        default_params = {
+            'n_estimators': 100,
+            'max_depth': 10,
+            'min_samples_split': 10,
+            'min_samples_leaf': 5,
+            'random_state': 42
+        }
+        default_params.update(et_params)
+        
+        self.model = ExtraTreesClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the Extra Trees model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using Extra Trees predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+    
+    def get_feature_importance(self):
+        """Get feature importance from Extra Trees."""
+        if not self.is_trained:
+            return None
+            
+        importance_df = pd.DataFrame({
+            'feature': self.feature_names,
+            'importance': self.model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        return importance_df
+
+
+class GradientBoostingSignalGenerator(SignalGenerator):
+    """
+    Gradient Boosting based signal generator (scikit-learn version).
+    """
+    
+    def __init__(self, name="Gradient Boosting", probability_threshold=0.5, **gb_params):
+        """
+        Initialize Gradient Boosting signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **gb_params: Additional parameters for GradientBoostingClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default Gradient Boosting parameters
+        default_params = {
+            'n_estimators': 100,
+            'learning_rate': 0.1,
+            'max_depth': 6,
+            'min_samples_split': 10,
+            'min_samples_leaf': 5,
+            'random_state': 42
+        }
+        default_params.update(gb_params)
+        
+        self.model = GradientBoostingClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the Gradient Boosting model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using Gradient Boosting predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+    
+    def get_feature_importance(self):
+        """Get feature importance from Gradient Boosting."""
+        if not self.is_trained:
+            return None
+            
+        importance_df = pd.DataFrame({
+            'feature': self.feature_names,
+            'importance': self.model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        return importance_df
+
+
+class MLPSignalGenerator(SignalGenerator):
+    """
+    Multi-Layer Perceptron (Neural Network) based signal generator.
+    """
+    
+    def __init__(self, name="Neural Network", probability_threshold=0.5, **mlp_params):
+        """
+        Initialize MLP signal generator.
+        
+        Args:
+            name (str): Name of the signal generator
+            probability_threshold (float): Threshold for buy signal (0-1)
+            **mlp_params: Additional parameters for MLPClassifier
+        """
+        super().__init__(name)
+        self.probability_threshold = probability_threshold
+        
+        # Default MLP parameters
+        default_params = {
+            'hidden_layer_sizes': (100, 50),
+            'activation': 'relu',
+            'solver': 'adam',
+            'alpha': 0.001,
+            'learning_rate': 'constant',
+            'max_iter': 500,
+            'random_state': 42,
+            'early_stopping': True,
+            'validation_fraction': 0.1
+        }
+        default_params.update(mlp_params)
+        
+        self.model = MLPClassifier(**default_params)
+        self.feature_names = None
+    
+    def fit(self, X_train, y_train):
+        """Train the MLP model."""
+        print(f"Training {self.name} model...")
+        
+        self.feature_names = X_train.columns.tolist()
+        self.model.fit(X_train, y_train)
+        self.is_trained = True
+        
+        # Print training performance
+        train_accuracy = self.model.score(X_train, y_train)
+        print(f"{self.name} training accuracy: {train_accuracy:.3f}")
+        
+        return self
+    
+    def generate_signals(self, X):
+        """Generate signals using MLP predictions."""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before generating signals")
+        
+        # Get prediction probabilities
+        probabilities = self.model.predict_proba(X)[:, 1]  # Probability of class 1 (buy)
+        
+        # Generate binary signals based on threshold
+        signals = (probabilities >= self.probability_threshold).astype(int)
+        
+        # Create results DataFrame
+        results = pd.DataFrame({
+            'Signal': signals,
+            'Probability': probabilities
+        }, index=X.index)
+        
+        return results
+
+
 class BuyAndHoldSignalGenerator(SignalGenerator):
     """
     Buy and hold signal generator (always buy signal).
@@ -437,6 +878,20 @@ def create_signal_generator(generator_type, **kwargs):
         'lr': LogisticRegressionSignalGenerator,
         'logistic': LogisticRegressionSignalGenerator,
         'svm': SVMSignalGenerator,
+        'knn': KNeighborsSignalGenerator,
+        'kneighbors': KNeighborsSignalGenerator,
+        'k_neighbors': KNeighborsSignalGenerator,
+        'xgb': XGBoostSignalGenerator,
+        'xgboost': XGBoostSignalGenerator,
+        'lgb': LightGBMSignalGenerator,
+        'lightgbm': LightGBMSignalGenerator,
+        'et': ExtraTreesSignalGenerator,
+        'extra_trees': ExtraTreesSignalGenerator,
+        'gb': GradientBoostingSignalGenerator,
+        'gradient_boosting': GradientBoostingSignalGenerator,
+        'mlp': MLPSignalGenerator,
+        'neural_network': MLPSignalGenerator,
+        'nn': MLPSignalGenerator,
         'sma': SimpleMovingAverageSignalGenerator,
         'moving_average': SimpleMovingAverageSignalGenerator,
         'rsi': RSISignalGenerator,

@@ -94,6 +94,90 @@ def run_strategy_comparison():
             'type': 'svm',
             'params': {'probability_threshold': 0.5, 'C': 1.0}
         },
+        'K-Neighbors (5)': {
+            'type': 'knn',
+            'params': {'probability_threshold': 0.5, 'n_neighbors': 5, 'weights': 'distance'}
+        },
+        'K-Neighbors (10)': {
+            'type': 'knn',
+            'params': {'probability_threshold': 0.5, 'n_neighbors': 10, 'weights': 'distance'}
+        },
+        'K-Neighbors Uniform': {
+            'type': 'knn',
+            'params': {'probability_threshold': 0.5, 'n_neighbors': 7, 'weights': 'uniform'}
+        },
+        'XGBoost': {
+            'type': 'xgb',
+            'params': {'probability_threshold': 0.5, 'n_estimators': 100, 'max_depth': 6}
+        },
+        'XGBoost Conservative': {
+            'type': 'xgb',
+            'params': {'probability_threshold': 0.6, 'n_estimators': 150, 'max_depth': 4, 'learning_rate': 0.05}
+        },
+        'LightGBM': {
+            'type': 'lgb',
+            'params': {'probability_threshold': 0.5, 'n_estimators': 100, 'max_depth': 6}
+        },
+        'LightGBM Aggressive': {
+            'type': 'lgb',
+            'params': {'probability_threshold': 0.4, 'n_estimators': 200, 'max_depth': 8, 'learning_rate': 0.1}
+        },
+        'Extra Trees': {
+            'type': 'et',
+            'params': {'probability_threshold': 0.5, 'n_estimators': 100, 'max_depth': 10}
+        },
+        'Extra Trees Deep': {
+            'type': 'et',
+            'params': {'probability_threshold': 0.45, 'n_estimators': 200, 'max_depth': 15}
+        },
+        'Gradient Boosting': {
+            'type': 'gb',
+            'params': {'probability_threshold': 0.5, 'n_estimators': 100, 'learning_rate': 0.1}
+        },
+        'Gradient Boosting Slow': {
+            'type': 'gb',
+            'params': {'probability_threshold': 0.55, 'n_estimators': 150, 'learning_rate': 0.05, 'max_depth': 4}
+        },
+        'Neural Network': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.5, 'hidden_layer_sizes': (100, 50), 'max_iter': 800, 'alpha': 0.001}
+        },
+        'Neural Network Deep': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.45, 'hidden_layer_sizes': (200, 100, 50), 'max_iter': 1000, 'alpha': 0.0005}
+        },
+        'Neural Network Wide': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.48, 'hidden_layer_sizes': (300, 150), 'max_iter': 800, 'alpha': 0.001}
+        },
+        'Neural Network Narrow Deep': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.52, 'hidden_layer_sizes': (80, 60, 40, 20), 'max_iter': 1200, 'alpha': 0.0008}
+        },
+        'Neural Network Conservative': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.6, 'hidden_layer_sizes': (150, 100, 50), 'max_iter': 1000, 'alpha': 0.002}
+        },
+        'Neural Network Aggressive': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.4, 'hidden_layer_sizes': (250, 150, 75), 'max_iter': 1200, 'alpha': 0.0003}
+        },
+        'Neural Network Tanh': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.5, 'hidden_layer_sizes': (150, 100), 'activation': 'tanh', 'max_iter': 800, 'alpha': 0.001}
+        },
+        'Neural Network Logistic': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.5, 'hidden_layer_sizes': (120, 80), 'activation': 'logistic', 'max_iter': 600, 'alpha': 0.001}
+        },
+        'Neural Network High Reg': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.5, 'hidden_layer_sizes': (200, 100), 'max_iter': 1000, 'alpha': 0.01}
+        },
+        'Neural Network Low Reg': {
+            'type': 'mlp',
+            'params': {'probability_threshold': 0.48, 'hidden_layer_sizes': (180, 120, 60), 'max_iter': 1200, 'alpha': 0.0001}
+        },
         'SMA Crossover': {
             'type': 'sma',
             'params': {'short_window': 20, 'long_window': 50}
